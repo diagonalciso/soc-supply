@@ -600,7 +600,7 @@ async function stats(){
   $('#meta').innerHTML='soc-intel: '+esc(s.socint)+'<br>last scan: '+esc(s.last_scan||'never');
   $('#mode').innerHTML = s.external_lookups
     ? '<div class="warn ext">⚠ EXTERNAL_LOOKUPS=1 — each scan also sends the party domain to Hudson Rock (via soc-intel). The register itself is still never uploaded.</div>'
-    : '<div class="warn">Private mode: only your self-hosted soc-intel is queried. No party data leaves this host. Set EXTERNAL_LOOKUPS=1 to add live Hudson Rock lookups.</div>';
+    : '';
 }
 async function parties(){
   const rows=await (await fetch('/api/parties')).json();
