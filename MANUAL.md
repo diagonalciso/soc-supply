@@ -118,7 +118,7 @@ in our intel", not "not breached" — absence of evidence.
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `SUPPLY_PORT` | `8109` | listen port |
-| `SUPPLY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` to keep it local |
+| `SUPPLY_HOST` | `127.0.0.1` | bind address. **Loopback by default** — there is no inbound auth, so exposing this port serves the register to the network. |
 | `SUPPLY_DB` | `./supply.db` | SQLite path |
 | `EXTERNAL_LOOKUPS` | `0` | `1` adds the Hudson Rock live lookup |
 | `SCAN_INTERVAL_H` | `24` | background rescan period; `0` disables |

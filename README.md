@@ -78,7 +78,7 @@ python3 app.py
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `SUPPLY_PORT` | `8109` | listen port |
-| `SUPPLY_HOST` | `0.0.0.0` | bind address |
+| `SUPPLY_HOST` | `127.0.0.1` | bind address (loopback by default; no inbound auth) |
 | `SUPPLY_DB` | `./supply.db` | SQLite path |
 | `EXTERNAL_LOOKUPS` | `0` | `1` enables the Hudson Rock live lookup |
 | `SCAN_INTERVAL_H` | `24` | background rescan period; `0` disables |

@@ -38,7 +38,10 @@ from urllib.parse import urlparse, parse_qs, quote
 from urllib.request import Request, urlopen
 
 PORT = int(os.getenv("SUPPLY_PORT", "8109"))
-HOST = os.getenv("SUPPLY_HOST", "0.0.0.0")
+# Loopback by default: the register is confidential and this service has no inbound auth,
+# so a 0.0.0.0 default would serve /api/export to any host on the LAN. Override with
+# SUPPLY_HOST only behind an authenticating proxy or a firewall that fronts this port.
+HOST = os.getenv("SUPPLY_HOST", "127.0.0.1")
 DB_PATH = os.getenv("SUPPLY_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "supply.db"))
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "10"))
 
