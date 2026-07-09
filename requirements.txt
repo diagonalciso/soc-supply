@@ -1,0 +1,1 @@
+# soc-supply is stdlib-only — no runtime dependencies.

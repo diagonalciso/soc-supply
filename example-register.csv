@@ -1,0 +1,4 @@
+name,domain,category,criticality,contact,notes
+Acme Logistics,acme-logistics.example,supplier,high,ops@acme-logistics.example,ships nightly
+Beta Consulting,beta.example,vendor,medium,,payroll SaaS
+Northwind Retail,northwind.example,client,critical,soc@northwind.example,holds our API keys

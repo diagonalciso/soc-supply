@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+supply.db
+supply.db-wal
+supply.db-shm
+*.csv
+!example-register.csv

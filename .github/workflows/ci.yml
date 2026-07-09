@@ -1,0 +1,123 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python -m py_compile app.py
+
+      - name: no-upload guarantee
+        run: |
+          python - <<'PY'
+          import ast
+          tree = ast.parse(open("app.py", encoding="utf-8").read())
+
+          # Scan real code only: docstrings and comments are allowed to *name* the
+          # endpoints they promise not to call.
+          docs = set()
+          for node in ast.walk(tree):
+              if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                  b = node.body
+                  if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant) \
+                     and isinstance(b[0].value.value, str):
+                      docs.add(id(b[0].value))
+          code = [n.value for n in ast.walk(tree)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs]
+          code += [n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)]
+          code += [n.name for n in ast.walk(tree)
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+          hay = "\n".join(code)
+
+          # The register must never be shipped anywhere. Guard the write paths the
+          # sibling SOC services legitimately use.
+          for banned in ("intel/bulk", "x_clawint_source", "/cases", "create_case", "push_to_socint"):
+              assert banned not in hay, f"upload path in app.py code: {banned}"
+
+          # Every outbound request carrying a body must be the soc-intel login and
+          # nothing else. Anything new with data= is a potential exfil path.
+          senders = []
+          for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+              for call in [n for n in ast.walk(fn) if isinstance(n, ast.Call)]:
+                  name = getattr(call.func, "id", None) or getattr(call.func, "attr", None)
+                  if name in ("urlopen", "Request") and {k.arg for k in call.keywords} & {"data"}:
+                      senders.append(fn.name)
+          assert senders == ["login"], f"outbound request body outside login(): {senders}"
+          print("no-upload ok")
+          PY
+
+      - name: privacy + register tests
+        run: |
+          python - <<'PY'
+          import os, tempfile
+          os.environ["SUPPLY_DB"] = tempfile.mkstemp(suffix=".db")[1]
+          import app
+
+          assert app.EXTERNAL_LOOKUPS is False, "external lookups must default off"
+          assert not hasattr(app.Intel, "post"), "Intel client must stay read-only"
+          assert app.stats.__module__ == "app"
+          app._init_db()
+
+          # validation
+          ok, err = app._clean_party({"name": "Acme", "domain": "https://acme.example/x"})
+          assert err is None and ok["domain"] == "acme.example", ok
+          assert ok["category"] == "supplier" and ok["criticality"] == "medium"
+          _, err = app._clean_party({"name": "", "domain": "acme.example"})
+          assert err == "name is required"
+          _, err = app._clean_party({"name": "X", "domain": "not a domain"})
+          assert err.startswith("invalid domain")
+          # unknown enum values degrade, they do not fail
+          ok, err = app._clean_party({"name": "X", "domain": "a.example",
+                                      "category": "zzz", "criticality": "zzz"})
+          assert (ok["category"], ok["criticality"]) == ("other", "medium")
+
+          # CSV import, header + headerless, idempotent on domain
+          csv_h = ("name,domain,category,criticality,contact,notes\n"
+                   "Acme,acme.example,supplier,high,a@acme.example,x\n")
+          rows, err = app.parse_import(csv_h.encode(), "text/csv")
+          assert err is None and len(rows) == 1, (rows, err)
+          r = app.import_rows(rows)
+          assert (r["added"], r["updated"]) == (1, 0), r
+          r = app.import_rows(rows)
+          assert (r["added"], r["updated"]) == (0, 1), "re-import must update, not duplicate"
+
+          rows, err = app.parse_import(b"Beta,beta.example,vendor,low,,y\n", "text/csv")
+          assert err is None and app.import_rows(rows)["added"] == 1
+
+          # JSON import, both shapes
+          rows, _ = app.parse_import(b'[{"name":"Gamma","domain":"gamma.example"}]', "application/json")
+          assert app.import_rows(rows)["added"] == 1
+          rows, _ = app.parse_import(b'{"parties":[{"name":"Delta","domain":"delta.example"}]}', "application/json")
+          assert app.import_rows(rows)["added"] == 1
+          _, err = app.parse_import(b"{oops", "application/json")
+          assert err and err.startswith("bad JSON")
+
+          # bad rows are skipped and reported, good rows still land
+          rows, _ = app.parse_import(b'[{"name":"","domain":"x.example"},{"name":"E","domain":"e.example"}]', "application/json")
+          r = app.import_rows(rows)
+          assert (r["added"], r["skipped"]) == (1, 1) and r["errors"], r
+
+          assert len(app.list_parties()) == 5
+          assert "acme.example" in app.export_csv()
+
+          # delete removes the party
+          pid = [p for p in app.list_parties() if p["domain"] == "beta.example"][0]["id"]
+          assert app.delete_party(pid)["deleted"] == 1
+          assert len(app.list_parties()) == 4
+
+          # severity map covers every emitted kind
+          for k in app._Q_TYPES + ("credential-exposure", "tg-message", "infostealer"):
+              assert k in app._SEVERITY, k
+
+          # multi_match guard
+          assert app._domain_matches({"domain": "Acme.example"}, "acme.example")
+          assert app._domain_matches({"affected_domains": ["acme.example"]}, "acme.example")
+          assert not app._domain_matches({"domain": "notacme.example"}, "acme.example")
+
+          assert app.stats()["uploads"] is False
+          print("privacy + register ok")
+          PY
