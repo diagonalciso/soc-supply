@@ -22,14 +22,11 @@ The register never leaves this host.
 - Import and export read and write **local files only**.
 - `supply.db` is gitignored. Back it up like any other sensitive SOC database.
 
-The UI binds `0.0.0.0` so analysts can reach it across the SOC LAN. Because the
-register is confidential, **any non-loopback bind is gated by a token** (HTTP Basic:
-any username, the token as the password). Set `SUPPLY_TOKEN`, or leave it blank and a
-token is generated on first boot (persisted to `.supply_token`, printed in the log).
-A loopback bind (`SUPPLY_HOST=127.0.0.1`) skips auth for local-only use. `/health` is
-always open so the hub can probe it. This is the one guarantee the code enforces on
-both sides — the CI build fails if a network bind could ever serve the register
-unauthenticated, mirroring the no-upload guard.
+The UI binds `0.0.0.0` so analysts can reach it across the SOC LAN, like every other
+stdlib module. Privacy here means the register is never **uploaded** anywhere — there
+is no outbound push path, and CI fails the build if one appears. Restrict inbound
+access at the network layer (bind `SUPPLY_HOST=127.0.0.1`, or firewall the port) if
+you want to lock it down further.
 
 ## Sources
 
@@ -83,8 +80,7 @@ python3 app.py
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `SUPPLY_PORT` | `8109` | listen port |
-| `SUPPLY_HOST` | `0.0.0.0` | bind address. Non-loopback binds require the token. |
-| `SUPPLY_TOKEN` | *(auto)* | HTTP Basic password for network access; blank = auto-generate to `.supply_token` |
+| `SUPPLY_HOST` | `0.0.0.0` | bind address; set `127.0.0.1` for local-only |
 | `SUPPLY_DB` | `./supply.db` | SQLite path |
 | `EXTERNAL_LOOKUPS` | `0` | `1` enables the Hudson Rock live lookup |
 | `SCAN_INTERVAL_H` | `24` | background rescan period; `0` disables |

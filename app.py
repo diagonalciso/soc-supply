@@ -25,13 +25,10 @@ export back out to CSV or JSON. Import is idempotent on `domain`.
 Deps: none (stdlib). Run: cp .env.example .env && python3 app.py
 """
 import csv
-import base64
-import hmac
 import io
 import json
 import os
 import re
-import secrets
 import sqlite3
 import threading
 import time
@@ -41,45 +38,12 @@ from urllib.parse import urlparse, parse_qs, quote
 from urllib.request import Request, urlopen
 
 PORT = int(os.getenv("SUPPLY_PORT", "8109"))
-# Network-reachable by default so analysts can open the register from the SOC LAN.
-# The register is confidential, so any non-loopback bind is gated by a token (see AUTH_TOKEN
-# / _authorized). Bind loopback if you would rather reach it only through the box.
+# Network-reachable so analysts can open the register from the SOC LAN, like every
+# other stdlib module. Privacy here means no OUTBOUND upload of the register (see the
+# module docstring + CI guard), not inbound auth. Bind loopback for local-only access.
 HOST = os.getenv("SUPPLY_HOST", "0.0.0.0")
 DB_PATH = os.getenv("SUPPLY_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "supply.db"))
 HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "10"))
-
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _resolve_token():
-    """Access token for network binds. Precedence: SUPPLY_TOKEN env -> persisted
-    .supply_token file -> freshly generated (persisted 0600). Empty env value on a
-    loopback bind means 'no auth' (local dev); on any other bind a token is always
-    enforced, so the register can never be served unauthenticated to the network."""
-    t = os.getenv("SUPPLY_TOKEN")
-    if t:
-        return t.strip()
-    tok_file = os.path.join(_APP_DIR, ".supply_token")
-    try:
-        with open(tok_file, encoding="utf-8") as fh:
-            saved = fh.read().strip()
-        if saved:
-            return saved
-    except OSError:
-        pass
-    gen = secrets.token_urlsafe(24)
-    try:
-        with open(tok_file, "w", encoding="utf-8") as fh:
-            fh.write(gen + "\n")
-        os.chmod(tok_file, 0o600)
-    except OSError:
-        pass
-    return gen
-
-
-AUTH_TOKEN = _resolve_token()
-# Auth is enforced on every bind except pure loopback (local dev convenience).
-AUTH_REQUIRED = HOST not in ("127.0.0.1", "localhost", "::1")
 
 # Opt-in: live third-party lookup. Off => nothing but self-hosted soc-intel is queried.
 EXTERNAL_LOOKUPS = os.getenv("EXTERNAL_LOOKUPS", "0") == "1"
@@ -734,32 +698,13 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(n) if n else b""
 
-    def _authorized(self):
-        """HTTP Basic; any username, password must equal AUTH_TOKEN. Skipped on a
-        loopback bind. Constant-time compare. /health is exempt so the hub probe works."""
-        if not AUTH_REQUIRED:
-            return True
-        hdr = self.headers.get("Authorization", "")
-        if hdr.startswith("Basic "):
-            try:
-                pw = base64.b64decode(hdr[6:]).decode("utf-8", "replace").split(":", 1)[-1]
-            except (ValueError, UnicodeError):
-                pw = ""
-            if AUTH_TOKEN and hmac.compare_digest(pw, AUTH_TOKEN):
-                return True
-        self._send(401, "text/plain", "authentication required",
-                   {"WWW-Authenticate": 'Basic realm="soc-supply"'})
-        return False
-
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         path = u.path.rstrip("/") or "/"
         if path == "/health":
             return self._json({"status": "ok", "external_lookups": EXTERNAL_LOOKUPS,
-                               "uploads": False, "auth": AUTH_REQUIRED})
-        if not self._authorized():
-            return
+                               "uploads": False})
         if path == "/manual":
             return _serve_manual(self)
         if path in ("/", "/index.html"):
@@ -783,8 +728,6 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         path = u.path.rstrip("/") or "/"
-        if not self._authorized():
-            return
         pid = int(q.get("id", ["0"])[0] or 0)
         try:
             if path == "/api/party/add":
@@ -913,9 +856,4 @@ if __name__ == "__main__":
     print(f"soc-supply on http://{HOST}:{PORT}  "
           f"(external_lookups={'ON' if EXTERNAL_LOOKUPS else 'OFF'}, "
           f"rescan={SCAN_INTERVAL_H}h, uploads=NEVER)")
-    if AUTH_REQUIRED:
-        print(f"  auth: HTTP Basic required (any username). Token: {AUTH_TOKEN}")
-        print(f"        set SUPPLY_TOKEN to pin it; auto-token persisted in .supply_token")
-    else:
-        print("  auth: OFF (loopback bind — local access only)")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

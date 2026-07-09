@@ -6,4 +6,3 @@ supply.db-wal
 supply.db-shm
 *.csv
 !example-register.csv
-.supply_token
