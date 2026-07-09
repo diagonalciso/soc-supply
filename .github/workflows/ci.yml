@@ -53,19 +53,26 @@ jobs:
       - name: privacy + register tests
         run: |
           python - <<'PY'
-          import os, tempfile
+          import os, tempfile, importlib
           os.environ["SUPPLY_DB"] = tempfile.mkstemp(suffix=".db")[1]
-          # HOST is read from the environment at import, so clear any override:
-          # this asserts the shipped default, not whatever the runner happens to export.
-          os.environ.pop("SUPPLY_HOST", None)
           import app
 
           assert app.EXTERNAL_LOOKUPS is False, "external lookups must default off"
           assert not hasattr(app.Intel, "post"), "Intel client must stay read-only"
-          # The no-upload guard only stops data leaving via our own outbound requests.
-          # With no inbound auth, a 0.0.0.0 bind serves /api/export to the whole LAN,
-          # so the default bind is part of the privacy contract too.
-          assert app.HOST == "127.0.0.1", f"default bind must be loopback, got {app.HOST}"
+
+          # Privacy invariant: the register is confidential and there is no way to serve it
+          # to the network unauthenticated. A non-loopback bind MUST force auth; a loopback
+          # bind MAY skip it (local dev). Prove both by re-importing under each bind.
+          def reimport(host):
+              os.environ["SUPPLY_HOST"] = host
+              os.environ["SUPPLY_DB"] = tempfile.mkstemp(suffix=".db")[1]
+              return importlib.reload(app)
+          net = reimport("0.0.0.0")
+          assert net.AUTH_REQUIRED is True, "network bind must enforce auth"
+          assert net.AUTH_TOKEN, "a token must exist when auth is required"
+          lo = reimport("127.0.0.1")
+          assert lo.AUTH_REQUIRED is False, "loopback bind should skip auth"
+          app = reimport("127.0.0.1")
           assert app.stats.__module__ == "app"
           app._init_db()
 
