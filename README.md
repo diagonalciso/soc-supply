@@ -1,5 +1,7 @@
 # soc-supply
 
+> Third-party / supply-chain breach exposure monitor — private register, never uploaded (stdlib)
+
 Third-party / supply-chain exposure monitor. Keep a **private register** of the
 organisations you depend on — clients, suppliers, vendors, partners — and check
 each one's domain for breach exposure. Part of the CD SOC suite. Port **8109**.
